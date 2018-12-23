@@ -1,0 +1,258 @@
+/*
+  Horloge pour contrôler la sirène d’établissement scolaire
+  Redouane CHIBOUT: nano + LCD-I2C + RTC1307 + 3R=10K + module relais 5V
+  16-12-2017
+*/
+#include <LiquidCrystal_I2C.h>
+#include <Time.h>
+#include <DS1307RTC.h>
+#include <Wire.h>
+#include <AnalogButtons.h>
+#include <EEPROM.h>
+int sonnet = 13; // sortie vers le relais
+
+LiquidCrystal_I2C lcd(0x3F,2,1,0,4,5,6,7); // lcd(addr,RW,RS,E,D4,D5,D6;D7)
+String Jour[]={"Dim ", "Lun ", "Mar ", "Mer ", "Jeu ", "Ven ", "Sam "};
+byte memo=0, hautbas=0, droite=0, HrAlarm=0, MinAlarm=0, ConfigAlarm=0;
+byte CurCol[6]={6,9,14,5,8,11};
+byte CurColAlarm[10]={1,4,7,9,10,11,12,13,14,15};
+tmElements_t tmps;
+boolean actualiser=0;
+
+AnalogButtons pressBouton(A0, 100, &selectBouton);// Cmd les bouttons
+Button b1 = Button(1,670,800);
+Button b2 = Button(2,0,10);
+Button b3 = Button(3,500,530);
+
+void selectBouton(int id,boolean longAppui){  
+  switch (id) {
+      case 1: // haut = incrémenter
+        if(hautbas==0){
+          switch (droite) {
+              case 0:
+                hautbas+=1;
+                HrAlarm = EEPROM.read(hautbas*3);
+                MinAlarm = EEPROM.read(hautbas*3 + 1);
+                ConfigAlarm = EEPROM.read(hautbas*3 + 2);
+                actualiser=1;
+                break;
+              case 1:
+                tmps.Day+=1;
+                if(tmps.Day >31) tmps.Day=1;
+                memo -=1;
+                break;
+              case 2:
+                tmps.Month+=1;
+                if(tmps.Month >12) tmps.Month=1;
+                memo -=1;
+                break;
+              case 3:
+                tmps.Year+=1;
+                memo -=1;
+                break;
+              case 4:
+                tmps.Hour+=1;
+                if(tmps.Hour >23) tmps.Hour=0;
+                memo -=1;
+                break;
+              case 5:
+                tmps.Minute+=1;
+                if(tmps.Minute >59) tmps.Minute=0;
+                memo -=1;
+                break;
+              case 6:
+                tmps.Second+=1;
+                if(tmps.Second >59) tmps.Second=0;
+                memo -=1;
+                break;
+          }
+        } else {
+            switch (droite) {
+                case 0:
+                  if(hautbas==30){ // Nombre de sonnerie
+                    hautbas=0;
+                  }else{
+                      hautbas+=1;
+                      HrAlarm = EEPROM.read(hautbas*3);
+                      MinAlarm = EEPROM.read(hautbas*3 + 1);
+                      ConfigAlarm = EEPROM.read(hautbas*3 + 2);
+                    }
+                  break;
+                case 1:
+                  HrAlarm+=1;
+                  if(HrAlarm >23) HrAlarm=0;
+                  break;
+                case 2:
+                  MinAlarm+=1;
+                  if(MinAlarm >59) MinAlarm=0;
+                  break;
+                default:
+                  bitWrite(ConfigAlarm, droite-2, !bitRead(ConfigAlarm, droite-2));
+                  break;
+            }
+            actualiser=1;
+        }
+
+        break;
+      case 2: // bas = décrémenter
+        if(hautbas==0){
+          switch (droite) {
+              case 0:
+                hautbas=30; // Nombre de sonnerie
+                HrAlarm = EEPROM.read(hautbas*3);
+                MinAlarm = EEPROM.read(hautbas*3 + 1);
+                ConfigAlarm = EEPROM.read(hautbas*3 + 2);
+                actualiser=1;
+                break;
+              case 1:
+                tmps.Day-=1;
+                if(tmps.Day <1) tmps.Day=31;
+                memo -=1;
+                break;
+              case 2:
+                tmps.Month-=1;
+                if(tmps.Month <1) tmps.Month=12;
+                memo -=1;
+                break;
+              case 3:
+                tmps.Year-=1;
+                if(tmps.Year <45) tmps.Year=45; // YearMin = 2015
+                memo -=1;
+                break;
+              case 4:
+                tmps.Hour-=1;
+                if(tmps.Hour >23) tmps.Hour=23;
+                memo -=1;
+                break;
+              case 5:
+                tmps.Minute-=1;
+                if(tmps.Minute >59) tmps.Minute=59;
+                memo -=1;
+                break;
+              case 6:
+                tmps.Second-=1;
+                if(tmps.Second >59) tmps.Second=59;
+                memo =tmps.Second-1;
+                break;
+          }
+        } else {
+            switch (droite) {
+                case 0:
+                      hautbas-=1;
+                      HrAlarm = EEPROM.read(hautbas*3);
+                      MinAlarm = EEPROM.read(hautbas*3 + 1);
+                      ConfigAlarm = EEPROM.read(hautbas*3 + 2);
+                  break;
+                case 1:
+                  HrAlarm-=1;
+                  if(HrAlarm >23) HrAlarm=23;
+                  break;
+                case 2:
+                  MinAlarm-=1;
+                  if(MinAlarm >59) MinAlarm=59;
+                  break;
+                default:
+                  bitWrite(ConfigAlarm, droite-2, !bitRead(ConfigAlarm, droite-2));
+                  break;
+            }
+            actualiser=1;
+        }
+        break;
+      case 3: // droite = OK = Valider
+        droite +=1;
+        if (hautbas == 0 && droite > 6  ){
+          RTC.write(tmps); // écrire le temps sur RTC
+          setSyncProvider(RTC.get); //synchronisation du système avec RTC
+          droite=0;
+        }
+        if(droite > 9){
+          EEPROM.write(hautbas*3, HrAlarm);
+          EEPROM.write(hautbas*3 + 1, MinAlarm);
+          EEPROM.write(hautbas*3 + 2, ConfigAlarm);
+          droite=0;
+        }
+        actualiser=1;
+        break;
+  }
+}
+
+void affichage(){
+  if(hautbas==0){
+    if(droite==0) breakTime(now(),tmps) ;
+    if(memo!=tmps.Second){
+      lcd.setCursor(0,0);
+      lcd.print(' ');
+      lcd.print(Jour[tmps.Wday-1]);
+      aff(tmps.Day,"/");
+      aff(tmps.Month,"/");
+      aff(tmYearToCalendar(tmps.Year)," "); 
+      lcd.setCursor(0,1);
+      lcd.print("    "); // 4 espaces 
+      aff(tmps.Hour,":");
+      aff(tmps.Minute,":");
+      aff(tmps.Second,"    "); // 4 espaces
+      memo =tmps.Second;
+    }  
+    if(droite==0){
+      lcd.noBlink();
+    } else {
+      lcd.setCursor(CurCol[droite-1],droite/4); //positionner le curseur selon droite
+      lcd.cursor(); //afficher le curseur
+      }
+  } else {
+      if(actualiser){
+        lcd.setCursor(0,0);
+        lcd.print("AL Heure DLMMJVS");
+        lcd.setCursor(0,1);
+        aff(hautbas," ");
+        aff(HrAlarm,":");
+        aff(MinAlarm," ");
+        for (byte j=1; j <= 7; j++) lcd.print(bitRead(ConfigAlarm, j));
+        lcd.setCursor(CurColAlarm[droite],1); //positionner le curseur selon droite
+        lcd.blink(); //afficher le curseur    
+        actualiser=0;      
+      }
+    }
+}
+
+void aff(int nbr,String chaine){
+  if(nbr < 10) lcd.print('0');
+  lcd.print(String(nbr)+chaine);
+}
+
+void setup() {
+  //Serial.begin(9600); 
+  pinMode(sonnet, OUTPUT);
+ digitalWrite(sonnet, 1); /// puisque c un module
+  lcd.begin(16,2);
+  lcd.setBacklightPin(3,POSITIVE);
+  lcd.setBacklight(HIGH);  // lumiere arriere plan lcd
+  setSyncProvider(RTC.get);   // config la lecture du temps RTC 
+ 
+  pressBouton.addButton(b1);
+  pressBouton.addButton(b2);
+  pressBouton.addButton(b3);
+  
+}
+
+
+void loop() { 
+//AnalogButtons::configure(A0); // nzawlo
+  affichage();
+  pressBouton.checkButtons(); // vérifier si un bouton est appuyer
+  
+  if( !second() ){ // Nombre de sonnerie + 1
+    for (byte k=1; k < 31 ; k++){ // vérifier si l'heure d'un alarme est arrivée
+      byte HrA = EEPROM.read(k*3);
+      byte MinA = EEPROM.read(k*3 + 1);
+      byte ConfigA = EEPROM.read(k*3 + 2);
+      if( hour() == HrA && minute() == MinA && bitRead(ConfigA, weekday())==1 ){
+        digitalWrite(sonnet, 0);// 0 /// puisque c un module
+        break;
+      }      
+    }
+  }
+ // temps de la sonnerie: 6 second
+  if(second() > 6 && !digitalRead(sonnet)) digitalWrite(sonnet, 1); //stop alarme après 6s  ///1 puisque c un module
+
+  }
